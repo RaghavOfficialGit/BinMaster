@@ -1,38 +1,47 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Query
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from bson import ObjectId
 import httpx
 from base64 import b64encode
-import xml.etree.ElementTree as ET
 
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+# Configuration
+DATA_SOURCE = os.getenv('DATA_SOURCE', 'mock')  # 'mock' or 'sap'
+
+# MongoDB connection (for mock mode)
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
+
 # SAP Configuration
-SAP_API_BASE_URL = os.environ['SAP_API_BASE_URL']
-SAP_API_USERNAME = os.environ['SAP_API_USERNAME']
-SAP_API_PASSWORD = os.environ['SAP_API_PASSWORD']
-SAP_ODATA_PATH = os.environ['SAP_ODATA_PATH']
+SAP_API_BASE_URL = os.getenv('SAP_API_BASE_URL', '')
+SAP_API_USERNAME = os.getenv('SAP_API_USERNAME', '')
+SAP_API_PASSWORD = os.getenv('SAP_API_PASSWORD', '')
+SAP_ODATA_PATH = os.getenv('SAP_ODATA_PATH', '')
 
-# Create Basic Auth header
-auth_string = f"{SAP_API_USERNAME}:{SAP_API_PASSWORD}"
-auth_bytes = auth_string.encode('ascii')
-auth_b64 = b64encode(auth_bytes).decode('ascii')
-SAP_AUTH_HEADER = f"Basic {auth_b64}"
+# Create Basic Auth header for SAP
+if SAP_API_USERNAME and SAP_API_PASSWORD:
+    auth_string = f"{SAP_API_USERNAME}:{SAP_API_PASSWORD}"
+    auth_bytes = auth_string.encode('ascii')
+    auth_b64 = b64encode(auth_bytes).decode('ascii')
+    SAP_AUTH_HEADER = f"Basic {auth_b64}"
+else:
+    SAP_AUTH_HEADER = ""
 
-# Create the main app without a prefix
+# Create the main app
 app = FastAPI()
-
-# Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
-
 
 # Configure logging
 logging.basicConfig(
@@ -81,37 +90,22 @@ class BinStats(BaseModel):
     utilization_percentage: float
 
 
-# SAP OData Helper Functions
-def parse_sap_odata_xml(xml_content: str) -> List[Dict[str, Any]]:
-    """Parse SAP OData XML response and extract bin data"""
-    try:
-        root = ET.fromstring(xml_content)
-        
-        # Define namespaces
-        namespaces = {
-            'atom': 'http://www.w3.org/2005/Atom',
-            'd': 'http://schemas.microsoft.com/ado/2007/08/dataservices',
-            'm': 'http://schemas.microsoft.com/ado/2007/08/dataservices/metadata'
-        }
-        
-        bins = []
-        entries = root.findall('.//atom:entry', namespaces)
-        
-        for entry in entries:
-            content = entry.find('.//m:properties', namespaces)
-            if content is not None:
-                bin_data = {}
-                for child in content:
-                    tag = child.tag.split('}')[-1]
-                    bin_data[tag] = child.text or ""
-                bins.append(bin_data)
-        
-        return bins
-    except Exception as e:
-        logger.error(f"Error parsing SAP XML: {e}")
-        return []
+# MongoDB Helper Functions
+def bin_helper(bin) -> dict:
+    return {
+        "id": str(bin["_id"]),
+        "bin_number": bin["bin_number"],
+        "location": bin["location"],
+        "capacity": bin["capacity"],
+        "current_stock": bin["current_stock"],
+        "status": bin["status"],
+        "barcode": bin.get("barcode", ""),
+        "last_updated": bin["last_updated"],
+        "created_at": bin["created_at"]
+    }
 
 
+# SAP Helper Functions
 def map_sap_to_bin(sap_data: Dict[str, Any]) -> Dict[str, Any]:
     """Map SAP OData fields to our Bin model"""
     return {
@@ -157,28 +151,25 @@ async def call_sap_api(endpoint: str, method: str = "GET", data: Dict = None) ->
                     detail=f"SAP API Error: {response.text}"
                 )
             
-            # Handle different response types
             if method == "DELETE":
                 return {"message": "Deleted successfully"}
             
-            try:
-                return response.json()
-            except:
-                # If not JSON, try XML
-                return parse_sap_odata_xml(response.text)
+            return response.json()
                 
     except httpx.TimeoutException:
-        logger.error(f"SAP API timeout for {url}")
         raise HTTPException(status_code=504, detail="SAP API timeout")
     except httpx.RequestError as e:
-        logger.error(f"SAP API request error: {e}")
         raise HTTPException(status_code=503, detail=f"SAP API unavailable: {str(e)}")
 
 
 # Routes
 @api_router.get("/")
 async def root():
-    return {"message": "Warehouse Bin Lookup API - SAP Integration"}
+    return {
+        "message": "Warehouse Bin Lookup API - Hybrid Mode",
+        "data_source": DATA_SOURCE,
+        "info": "Set DATA_SOURCE=sap in .env to use SAP BTP"
+    }
 
 
 @api_router.get("/bins", response_model=List[WarehouseBin])
@@ -188,137 +179,180 @@ async def get_bins(
     search: Optional[str] = None,
     status: Optional[str] = None
 ):
-    """Get all bins from SAP with optional filtering"""
-    try:
-        # Build OData query
-        odata_filters = []
-        
-        if search:
-            odata_filters.append(
-                f"(substringof('{search}',StorageBin) eq true or "
-                f"substringof('{search}',Warehouse) eq true)"
-            )
-        
-        if status == "inactive":
-            odata_filters.append("BlockingIndicator ne ''")
-        elif status == "active":
-            odata_filters.append("BlockingIndicator eq ''")
-        
-        filter_query = " and ".join(odata_filters) if odata_filters else ""
-        endpoint = f"/A_WarehouseStorageBin?$format=json&$top={limit}&$skip={skip}"
-        
-        if filter_query:
-            endpoint += f"&$filter={filter_query}"
-        
-        result = await call_sap_api(endpoint)
-        
-        # Parse SAP response
-        bins = []
-        if isinstance(result, dict) and 'd' in result:
-            sap_bins = result['d'].get('results', [])
-            for sap_bin in sap_bins:
-                mapped_bin = map_sap_to_bin(sap_bin)
-                bins.append(mapped_bin)
-        
-        return bins
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching bins from SAP: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching bins: {str(e)}")
+    """Get all bins with pagination and filtering"""
+    if DATA_SOURCE == 'sap':
+        return await get_bins_from_sap(skip, limit, search, status)
+    else:
+        return await get_bins_from_mongodb(skip, limit, search, status)
+
+
+async def get_bins_from_mongodb(skip, limit, search, status):
+    """Get bins from MongoDB"""
+    query = {}
+    
+    if search:
+        query["$or"] = [
+            {"bin_number": {"$regex": search, "$options": "i"}},
+            {"location": {"$regex": search, "$options": "i"}},
+            {"barcode": {"$regex": search, "$options": "i"}}
+        ]
+    
+    if status:
+        query["status"] = status
+    
+    bins = await db.warehouse_bins.find(query).skip(skip).limit(limit).to_list(limit)
+    return [bin_helper(bin) for bin in bins]
+
+
+async def get_bins_from_sap(skip, limit, search, status):
+    """Get bins from SAP"""
+    odata_filters = []
+    
+    if search:
+        odata_filters.append(
+            f"(substringof('{search}',StorageBin) eq true or "
+            f"substringof('{search}',Warehouse) eq true)"
+        )
+    
+    if status == "inactive":
+        odata_filters.append("BlockingIndicator ne ''")
+    elif status == "active":
+        odata_filters.append("BlockingIndicator eq ''")
+    
+    filter_query = " and ".join(odata_filters) if odata_filters else ""
+    endpoint = f"/A_WarehouseStorageBin?$format=json&$top={limit}&$skip={skip}"
+    
+    if filter_query:
+        endpoint += f"&$filter={filter_query}"
+    
+    result = await call_sap_api(endpoint)
+    
+    bins = []
+    if isinstance(result, dict) and 'd' in result:
+        sap_bins = result['d'].get('results', [])
+        for sap_bin in sap_bins:
+            bins.append(map_sap_to_bin(sap_bin))
+    
+    return bins
 
 
 @api_router.get("/bins/count", response_model=BinStats)
 async def get_bin_stats():
-    """Get warehouse bin statistics from SAP"""
-    try:
-        # Get all bins for statistics (SAP OData $count might not be available)
-        endpoint = "/A_WarehouseStorageBin?$format=json&$top=1000"
-        result = await call_sap_api(endpoint)
-        
-        bins = []
-        if isinstance(result, dict) and 'd' in result:
-            bins = result['d'].get('results', [])
-        
-        total_bins = len(bins)
-        active_bins = sum(1 for b in bins if not b.get('BlockingIndicator'))
-        inactive_bins = total_bins - active_bins
-        
-        total_capacity = sum(int(b.get('MaximumStorageCapacity', 0) or 0) for b in bins)
-        total_stock = sum(int(b.get('CurrentStock', 0) or 0) for b in bins)
-        
-        utilization = (total_stock / total_capacity * 100) if total_capacity > 0 else 0
-        
-        return BinStats(
-            total_bins=total_bins,
-            active_bins=active_bins,
-            inactive_bins=inactive_bins,
-            total_capacity=total_capacity,
-            total_stock=total_stock,
-            utilization_percentage=round(utilization, 2)
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching stats from SAP: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching statistics: {str(e)}")
+    """Get warehouse bin statistics"""
+    if DATA_SOURCE == 'sap':
+        return await get_stats_from_sap()
+    else:
+        return await get_stats_from_mongodb()
+
+
+async def get_stats_from_mongodb():
+    """Get statistics from MongoDB"""
+    total_bins = await db.warehouse_bins.count_documents({})
+    active_bins = await db.warehouse_bins.count_documents({"status": "active"})
+    inactive_bins = await db.warehouse_bins.count_documents({"status": "inactive"})
+    
+    pipeline = [
+        {
+            "$group": {
+                "_id": None,
+                "total_capacity": {"$sum": "$capacity"},
+                "total_stock": {"$sum": "$current_stock"}
+            }
+        }
+    ]
+    
+    result = await db.warehouse_bins.aggregate(pipeline).to_list(1)
+    
+    total_capacity = result[0]["total_capacity"] if result else 0
+    total_stock = result[0]["total_stock"] if result else 0
+    utilization = (total_stock / total_capacity * 100) if total_capacity > 0 else 0
+    
+    return BinStats(
+        total_bins=total_bins,
+        active_bins=active_bins,
+        inactive_bins=inactive_bins,
+        total_capacity=total_capacity,
+        total_stock=total_stock,
+        utilization_percentage=round(utilization, 2)
+    )
+
+
+async def get_stats_from_sap():
+    """Get statistics from SAP"""
+    endpoint = "/A_WarehouseStorageBin?$format=json&$top=1000"
+    result = await call_sap_api(endpoint)
+    
+    bins = []
+    if isinstance(result, dict) and 'd' in result:
+        bins = result['d'].get('results', [])
+    
+    total_bins = len(bins)
+    active_bins = sum(1 for b in bins if not b.get('BlockingIndicator'))
+    inactive_bins = total_bins - active_bins
+    
+    total_capacity = sum(int(b.get('MaximumStorageCapacity', 0) or 0) for b in bins)
+    total_stock = sum(int(b.get('CurrentStock', 0) or 0) for b in bins)
+    
+    utilization = (total_stock / total_capacity * 100) if total_capacity > 0 else 0
+    
+    return BinStats(
+        total_bins=total_bins,
+        active_bins=active_bins,
+        inactive_bins=inactive_bins,
+        total_capacity=total_capacity,
+        total_stock=total_stock,
+        utilization_percentage=round(utilization, 2)
+    )
 
 
 @api_router.get("/bins/barcode/{barcode}", response_model=WarehouseBin)
 async def get_bin_by_barcode(barcode: str):
-    """Lookup bin by barcode in SAP"""
-    try:
+    """Lookup bin by barcode"""
+    if DATA_SOURCE == 'sap':
         endpoint = f"/A_WarehouseStorageBin('{barcode}')?$format=json"
         result = await call_sap_api(endpoint)
         
         if isinstance(result, dict) and 'd' in result:
-            sap_bin = result['d']
-            return map_sap_to_bin(sap_bin)
+            return map_sap_to_bin(result['d'])
         
         raise HTTPException(status_code=404, detail="Bin not found with this barcode")
-        
-    except HTTPException as e:
-        if e.status_code == 404:
+    else:
+        bin_doc = await db.warehouse_bins.find_one({"barcode": barcode})
+        if not bin_doc:
             raise HTTPException(status_code=404, detail="Bin not found with this barcode")
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching bin by barcode from SAP: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching bin: {str(e)}")
+        return bin_helper(bin_doc)
 
 
 @api_router.get("/bins/{bin_id}", response_model=WarehouseBin)
 async def get_bin(bin_id: str):
-    """Get a single bin by ID from SAP"""
-    try:
+    """Get a single bin by ID"""
+    if DATA_SOURCE == 'sap':
         endpoint = f"/A_WarehouseStorageBin('{bin_id}')?$format=json"
         result = await call_sap_api(endpoint)
         
         if isinstance(result, dict) and 'd' in result:
-            sap_bin = result['d']
-            return map_sap_to_bin(sap_bin)
+            return map_sap_to_bin(result['d'])
         
         raise HTTPException(status_code=404, detail="Bin not found")
+    else:
+        try:
+            bin_doc = await db.warehouse_bins.find_one({"_id": ObjectId(bin_id)})
+        except:
+            raise HTTPException(status_code=400, detail="Invalid bin ID format")
         
-    except HTTPException as e:
-        if e.status_code == 404:
+        if not bin_doc:
             raise HTTPException(status_code=404, detail="Bin not found")
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching bin from SAP: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching bin: {str(e)}")
+        
+        return bin_helper(bin_doc)
 
 
 @api_router.post("/bins", response_model=WarehouseBin)
 async def create_bin(bin_data: BinCreate):
-    """Create a new warehouse bin in SAP"""
-    try:
-        # Validate stock doesn't exceed capacity
-        if bin_data.current_stock > bin_data.capacity:
-            raise HTTPException(status_code=400, detail="Current stock cannot exceed capacity")
-        
-        # Map to SAP format
+    """Create a new warehouse bin"""
+    if bin_data.current_stock > bin_data.capacity:
+        raise HTTPException(status_code=400, detail="Current stock cannot exceed capacity")
+    
+    if DATA_SOURCE == 'sap':
         sap_data = {
             "StorageBin": bin_data.bin_number,
             "Warehouse": bin_data.location.split(":")[1].split(",")[0].strip() if ":" in bin_data.location else "WH01",
@@ -332,34 +366,37 @@ async def create_bin(bin_data: BinCreate):
         result = await call_sap_api(endpoint, method="POST", data=sap_data)
         
         if isinstance(result, dict) and 'd' in result:
-            sap_bin = result['d']
-            return map_sap_to_bin(sap_bin)
+            return map_sap_to_bin(result['d'])
         
-        # Return created data if SAP doesn't return the object
         return WarehouseBin(**bin_data.dict(), id=bin_data.bin_number)
+    else:
+        # Check if bin_number already exists
+        existing = await db.warehouse_bins.find_one({"bin_number": bin_data.bin_number})
+        if existing:
+            raise HTTPException(status_code=400, detail="Bin number already exists")
         
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating bin in SAP: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating bin: {str(e)}")
+        bin_dict = bin_data.dict()
+        bin_dict["created_at"] = datetime.utcnow()
+        bin_dict["last_updated"] = datetime.utcnow()
+        
+        result = await db.warehouse_bins.insert_one(bin_dict)
+        created_bin = await db.warehouse_bins.find_one({"_id": result.inserted_id})
+        
+        return bin_helper(created_bin)
 
 
 @api_router.put("/bins/{bin_id}", response_model=WarehouseBin)
 async def update_bin(bin_id: str, bin_update: BinUpdate):
-    """Update a warehouse bin in SAP"""
-    try:
-        # Get current bin first
-        current_bin = await get_bin(bin_id)
-        
-        # Validate stock doesn't exceed capacity
-        capacity = bin_update.capacity if bin_update.capacity is not None else current_bin.capacity
-        current_stock = bin_update.current_stock if bin_update.current_stock is not None else current_bin.current_stock
-        
-        if current_stock > capacity:
-            raise HTTPException(status_code=400, detail="Current stock cannot exceed capacity")
-        
-        # Build SAP update data
+    """Update a warehouse bin"""
+    current_bin = await get_bin(bin_id)
+    
+    capacity = bin_update.capacity if bin_update.capacity is not None else current_bin.capacity
+    current_stock = bin_update.current_stock if bin_update.current_stock is not None else current_bin.current_stock
+    
+    if current_stock > capacity:
+        raise HTTPException(status_code=400, detail="Current stock cannot exceed capacity")
+    
+    if DATA_SOURCE == 'sap':
         sap_data = {}
         if bin_update.capacity is not None:
             sap_data["MaximumStorageCapacity"] = str(bin_update.capacity)
@@ -372,31 +409,46 @@ async def update_bin(bin_id: str, bin_update: BinUpdate):
             endpoint = f"/A_WarehouseStorageBin('{bin_id}')?$format=json"
             await call_sap_api(endpoint, method="PATCH", data=sap_data)
         
-        # Return updated bin
         return await get_bin(bin_id)
+    else:
+        try:
+            bin_doc = await db.warehouse_bins.find_one({"_id": ObjectId(bin_id)})
+        except:
+            raise HTTPException(status_code=400, detail="Invalid bin ID format")
         
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating bin in SAP: {e}")
-        raise HTTPException(status_code=500, detail=f"Error updating bin: {str(e)}")
+        if not bin_doc:
+            raise HTTPException(status_code=404, detail="Bin not found")
+        
+        update_data = {k: v for k, v in bin_update.dict().items() if v is not None}
+        
+        if update_data:
+            update_data["last_updated"] = datetime.utcnow()
+            await db.warehouse_bins.update_one(
+                {"_id": ObjectId(bin_id)},
+                {"$set": update_data}
+            )
+        
+        updated_bin = await db.warehouse_bins.find_one({"_id": ObjectId(bin_id)})
+        return bin_helper(updated_bin)
 
 
 @api_router.delete("/bins/{bin_id}")
 async def delete_bin(bin_id: str):
-    """Delete a warehouse bin in SAP"""
-    try:
+    """Delete a warehouse bin"""
+    if DATA_SOURCE == 'sap':
         endpoint = f"/A_WarehouseStorageBin('{bin_id}')?$format=json"
-        result = await call_sap_api(endpoint, method="DELETE")
+        await call_sap_api(endpoint, method="DELETE")
         return {"message": "Bin deleted successfully"}
+    else:
+        try:
+            result = await db.warehouse_bins.delete_one({"_id": ObjectId(bin_id)})
+        except:
+            raise HTTPException(status_code=400, detail="Invalid bin ID format")
         
-    except HTTPException as e:
-        if e.status_code == 404:
+        if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Bin not found")
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting bin in SAP: {e}")
-        raise HTTPException(status_code=500, detail=f"Error deleting bin: {str(e)}")
+        
+        return {"message": "Bin deleted successfully"}
 
 
 # Include the router in the main app
@@ -412,6 +464,15 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("Starting Warehouse Bin Lookup API with SAP Integration")
-    logger.info(f"SAP Base URL: {SAP_API_BASE_URL}")
-    logger.info(f"SAP OData Path: {SAP_ODATA_PATH}")
+    logger.info(f"Starting Warehouse Bin Lookup API - Hybrid Mode")
+    logger.info(f"Data Source: {DATA_SOURCE}")
+    if DATA_SOURCE == 'sap':
+        logger.info(f"SAP Base URL: {SAP_API_BASE_URL}")
+        logger.info(f"SAP OData Path: {SAP_ODATA_PATH}")
+    else:
+        logger.info(f"Using MongoDB: {mongo_url}")
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    if DATA_SOURCE == 'mock':
+        client.close()
