@@ -1,0 +1,38 @@
+{
+  "xsappname": "BinMaster",
+  "tenant-mode": "dedicated",
+  "description": "Security profile for Warehouse Bin Lookup Application",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.BinRead",
+      "description": "Read warehouse bins"
+    },
+    {
+      "name": "$XSAPPNAME.BinWrite",
+      "description": "Create and update warehouse bins"
+    },
+    {
+      "name": "$XSAPPNAME.BinDelete",
+      "description": "Delete warehouse bins"
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "WarehouseWorker",
+      "description": "Warehouse worker with read and write access",
+      "scope-references": [
+        "$XSAPPNAME.BinRead",
+        "$XSAPPNAME.BinWrite"
+      ]
+    },
+    {
+      "name": "WarehouseManager",
+      "description": "Warehouse manager with full access",
+      "scope-references": [
+        "$XSAPPNAME.BinRead",
+        "$XSAPPNAME.BinWrite",
+        "$XSAPPNAME.BinDelete"
+      ]
+    }
+  ]
+}
