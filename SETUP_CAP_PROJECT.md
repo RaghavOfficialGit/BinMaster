@@ -37,10 +37,11 @@ cat > package.json << 'EOF'
     "@sap/cds": "^7",
     "express": "^4",
     "@sap/xssec": "^3",
-    "@sap/xsenv": "^4"
+    "@sap/xsenv": "^4",
+    "hdb": "^0.19.0"
   },
   "devDependencies": {
-    "@cap-js/postgres": "^1"
+    "@sap/cds-dk": "^7"
   },
   "scripts": {
     "start": "cds-serve",
