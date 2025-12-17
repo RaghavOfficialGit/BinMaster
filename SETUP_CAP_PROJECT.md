@@ -55,7 +55,7 @@ cat > package.json << 'EOF'
       },
       "[production]": {
         "db": {
-          "kind": "postgres"
+          "kind": "hana"
         },
         "auth": {
           "kind": "xsuaa"
