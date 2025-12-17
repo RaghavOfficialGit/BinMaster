@@ -305,14 +305,11 @@ rm -rf node_modules package-lock.json
 npm install
 ```
 
-### Error: "PostgreSQL service not found"
-Update `mta.yaml`:
-```yaml
-resources:
-  - name: BinMaster-db
-    parameters:
-      service: hana
-      service-plan: hdi-shared
+### Error: "HANA service not found"
+Check available services:
+```bash
+cf marketplace | grep hana
+# Use the available service plan
 ```
 
 ---
