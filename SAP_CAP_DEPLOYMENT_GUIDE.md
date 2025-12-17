@@ -222,9 +222,11 @@ cf marketplace | grep hana
 
 ---
 
-## Alternative: Using HANA Instead of PostgreSQL
+## Database Configuration
 
-If your BTP doesn't have PostgreSQL, modify `mta.yaml`:
+The project is configured to use **SAP HANA Cloud** for production deployment.
+
+Current `mta.yaml` configuration:
 
 ```yaml
 resources:
@@ -235,12 +237,14 @@ resources:
       service-plan: hdi-shared
 ```
 
-And update `package.json`:
+The `package.json` is configured with:
 ```json
 "cds": {
   "requires": {
-    "db": {
-      "kind": "hana"
+    "[production]": {
+      "db": {
+        "kind": "hana"
+      }
     }
   }
 }
