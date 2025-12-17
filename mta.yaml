@@ -46,10 +46,10 @@ resources:
   # ------------------------------------------------------------
   - name: BinMaster-db
   # ------------------------------------------------------------
-    type: org.cloudfoundry.managed-service
+    type: com.sap.xs.hdi-container
     parameters:
-      service: postgresql
-      service-plan: standard
+      service: hana
+      service-plan: hdi-shared
       
   # ------------------------------------------------------------
   - name: BinMaster-auth
