@@ -227,11 +227,11 @@ npm init -y
 npm install @sap/cds express
 ```
 
-### Error: "PostgreSQL service not available"
-Change in mta.yaml:
-```yaml
-service: hana  # instead of postgresql
-service-plan: hdi-shared
+### Error: "HANA service not available"
+Check marketplace:
+```bash
+cf marketplace | grep hana
+# Verify HANA Cloud access in BTP Cockpit
 ```
 
 ---
