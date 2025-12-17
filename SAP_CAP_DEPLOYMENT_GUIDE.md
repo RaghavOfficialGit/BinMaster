@@ -213,12 +213,11 @@ npm init -y
 npm install @sap/cds --save
 ```
 
-### Error: "PostgreSQL service not found"
+### Error: "HANA service not found"
 **Solution:** Check service marketplace
 ```bash
-cf marketplace | grep postgres
-# If using HANA instead:
-# Update mta.yaml: service: hana
+cf marketplace | grep hana
+# Verify you have access to HANA Cloud
 ```
 
 ---
