@@ -335,6 +335,7 @@ This creates a complete SAP CAP application with:
 **OData Service:** REST API at `/warehouse/Bins`
 **Business Logic:** Validation (stock ≤ capacity)
 **Statistics Function:** Get bin utilization data
+**HANA Cloud:** Production database
 **XSUAA:** Authentication and authorization
 
 ---
