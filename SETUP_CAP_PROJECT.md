@@ -213,7 +213,7 @@ This will install:
 
 ---
 
-## Step 9: Build CDS Models
+## Step 8: Build CDS Models
 
 ```bash
 cds build --production
