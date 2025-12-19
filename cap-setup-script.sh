@@ -4,7 +4,7 @@
 echo "Setting up SAP CAP Warehouse Bin Lookup Project..."
 
 # Create directory structure
-mkdir -p db/data
+mkdir -p db
 mkdir -p srv
 mkdir -p app
 
