@@ -198,7 +198,7 @@ Should look like:
 
 ---
 
-## Step 8: Install Dependencies
+## Step 7: Install Dependencies
 
 ```bash
 npm install
