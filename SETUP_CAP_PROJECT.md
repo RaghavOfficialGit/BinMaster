@@ -15,7 +15,7 @@ cd /home/user/projects/BINMASTER/BinMasterAPP/BinMaster
 ## Step 1: Create Directory Structure
 
 ```bash
-mkdir -p db/data
+mkdir -p db
 mkdir -p srv
 mkdir -p app
 ```
