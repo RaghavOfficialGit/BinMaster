@@ -207,7 +207,6 @@ This will install:
 - express
 - @sap/xssec
 - @sap/xsenv
-- @cap-js/postgres
 
 ---
 
