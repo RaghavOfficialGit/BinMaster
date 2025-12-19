@@ -230,7 +230,7 @@ gen/
 
 ---
 
-## Step 10: Build MTA Archive
+## Step 9: Build MTA Archive
 
 ```bash
 mbt build -t ./
