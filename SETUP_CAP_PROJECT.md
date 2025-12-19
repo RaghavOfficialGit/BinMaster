@@ -38,7 +38,10 @@ cat > package.json << 'EOF'
     "express": "^4",
     "@sap/xssec": "^3",
     "@sap/xsenv": "^4",
-    "hdb": "^0.19.0"
+    "hdb": "^0.19.0",
+    "@sap-cloud-sdk/http-client": "^3",
+    "@sap-cloud-sdk/connectivity": "^3",
+    "@sap-cloud-sdk/util": "^3"
   },
   "devDependencies": {
     "@sap/cds-dk": "^7"
