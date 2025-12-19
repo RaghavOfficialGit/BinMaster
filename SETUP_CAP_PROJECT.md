@@ -335,8 +335,6 @@ This creates a complete SAP CAP application with:
 **OData Service:** REST API at `/warehouse/Bins`
 **Business Logic:** Validation (stock ≤ capacity)
 **Statistics Function:** Get bin utilization data
-**Sample Data:** 4 warehouse bins pre-loaded
-**PostgreSQL:** Production database
 **XSUAA:** Authentication and authorization
 
 ---
