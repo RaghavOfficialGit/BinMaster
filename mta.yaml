@@ -62,3 +62,22 @@ resources:
       config:
         xsappname: BinMaster-${org}-${space}
         tenant-mode: dedicated
+        
+  # ------------------------------------------------------------
+  - name: BinMaster-destination
+  # ------------------------------------------------------------
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+      config:
+        HTML5Runtime_enabled: true
+        init_data:
+          instance:
+            existing_destinations_policy: ignore
+            destinations:
+              - Name: HMF
+                Description: S/4HANA Backend System
+                Type: HTTP
+                Authentication: BasicAuthentication
+                ProxyType: Internet
