@@ -260,7 +260,7 @@ curl http://localhost:4004/warehouse/getBinStatistics()
 
 ---
 
-## Step 12: Deploy to Cloud Foundry
+## Step 11: Deploy to Cloud Foundry
 
 ```bash
 # Login
