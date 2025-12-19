@@ -31,6 +31,9 @@ modules:
     requires:
       - name: BinMaster-db
       - name: BinMaster-auth
+      - name: BinMaster-destination
+    properties:
+      S4_DESTINATION_NAME: HMF
 
   # -------------------- DATABASE MODULE -----------------------
   - name: BinMaster-db-deployer
