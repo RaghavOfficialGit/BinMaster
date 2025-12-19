@@ -188,9 +188,7 @@ Should look like:
 ├── xs-security.json
 ├── package.json
 ├── db/
-│   ├── schema.cds
-│   └── data/
-│       └── binmaster-WarehouseBins.csv
+│   └── schema.cds
 └── srv/
     ├── warehouse-service.cds
     └── warehouse-service.js
