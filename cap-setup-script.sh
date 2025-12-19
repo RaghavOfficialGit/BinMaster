@@ -137,15 +137,6 @@ module.exports = cds.service.impl(async function() {
 });
 EOF
 
-# Create sample data
-cat > db/data/binmaster-WarehouseBins.csv << 'EOF'
-ID;binNumber;location;capacity;currentStock;status;barcode
-550e8400-e29b-41d4-a716-446655440001;BIN-A001;Aisle A Row 1;1000;750;active;1234567890
-550e8400-e29b-41d4-a716-446655440002;BIN-A002;Aisle A Row 2;800;300;active;1234567891
-550e8400-e29b-41d4-a716-446655440003;BIN-B001;Aisle B Row 1;1200;1100;active;1234567892
-550e8400-e29b-41d4-a716-446655440004;BIN-C001;Aisle C Row 1;500;0;inactive;1234567893
-EOF
-
 echo "✅ Project structure created!"
 echo ""
 echo "Next steps:"
