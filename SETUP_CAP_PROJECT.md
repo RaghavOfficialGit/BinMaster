@@ -243,7 +243,7 @@ mta_archives/BinMaster_1.0.0.mtar
 
 ---
 
-## Step 11: Test Locally (Optional)
+## Step 10: Test Locally (Optional)
 
 Before deploying, test locally:
 
